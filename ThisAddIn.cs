@@ -119,6 +119,7 @@ namespace OutlookAddIn
             var body = mailItem.Body;
             var subject = mailItem.Subject;
             var senderEmail = mailItem.SenderEmailAddress;
+            var receiverEmail=mailItem.Recipients[1].Address;
 
             SendForm form = new SendForm(senderEmail, subject, body, "The message is ready for delivery.\nfor sending please press send:", "");
             form.ShowDialog();
@@ -131,15 +132,26 @@ namespace OutlookAddIn
             {
                 mailItem.Subject = "Message has been signed." + subject;
                 string signed_msg = Instance.SignMsg(body);
-                mailItem.Body = signed_msg;
+                mailItem.Body = body + "signature"  + signed_msg;
+                bool isValid = Instance.Verify_byte(body, signed_msg, senderEmail);
                 Cancel = false;
             }
             // for send, encrypt and sign
             else
             {
-                mailItem.Subject = "Message has been encrypted and signed." + subject;
-                string encrypted_msg = Instance.EncrypteMsgAndSign(body, senderEmail);
-                mailItem.Body = encrypted_msg;
+                string encrypted_msg= Instance.EncrypteMsgAndSign_byte(body, receiverEmail);
+                //for the email body:
+                if (encrypted_msg == "false")
+                {
+                    MessageBox.Show("The person you are trying to send a message to is not part of our platform. Your email will be send without encryption.");
+                    mailItem.Subject = subject;
+                    mailItem.Body = body;
+                }
+                else
+                {
+                    mailItem.Subject = "Message has been encrypted and signed." + subject;
+                    mailItem.Body = "Encrypted" + encrypted_msg;
+                }
                 Cancel = false;
             }
         }
