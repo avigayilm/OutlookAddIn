@@ -19,26 +19,47 @@ namespace OutlookAddIn
     class Encrypt
     {
 
-        public enum CHOICE { ENCRYPT, DECRYPT, SIGN, GET_KEY,GEN_KEY }
+        public enum CHOICE { ENCRYPT, DECRYPT, SIGN, GET_KEY,GEN_KEY,KEY_EX }
         string seperator = "+/+/+/+/";
         public Encrypt() { }
 
         #region send email
 
-
-        public string EncrypteMsgAndSign_byte(string body, string receiverEmail)
+        /// <summary>
+        /// returns a tuple of a bool, and byte array. if true, than person was in dictioanry, if false person 
+        /// wasn't in dictionary and a keyexchange will happen.
+        /// </summary>
+        /// <param name="body"></param>
+        /// <param name="receiverEmail"></param>
+        /// <returns></returns>
+        public Tuple<bool,string> EncrypteMsgAndSign_byte(string body, string receiverEmail)
         {
             //SIGN
             string signature_str = SignMsg(body);
             //ENCRYPT
             string data = receiverEmail + seperator + body;
-            string encryption_str = EncryptMsg(data);
-            if (encryption_str == "false")
-                return "false";
-            return encryption_str + "signature" + signature_str;
+            byte[]encryption = EncryptMsg(data);
+            // taking the first byte inorder to know what the command is.
+            int input = (int)encryption[0];
+            string encryption_str;
+            if (input == 0)
+            {
+                byte[] pk = new byte[encryption.Length - 1]; // new byte array without the command
+
+                // copy remaining values from original byte array to new byte array starting from index 1
+                Array.Copy(encryption, 1, pk, 0, pk.Length);
+                string pk_string=Convert.ToBase64String(pk);
+                return Tuple.Create(false,pk_string);
+            }
+            else
+            {
+                encryption_str =Convert.ToBase64String(encryption);
+                return Tuple.Create(true,encryption_str + "signature" + signature_str);
+            }
+            
         }
 
-        public string EncryptMsg(string body)
+        public byte[] EncryptMsg(string body)
         {
 
             byte[] message = Encoding.UTF8.GetBytes(body);
@@ -48,11 +69,25 @@ namespace OutlookAddIn
             byte[] newArray = new byte[] { byteToAdd }.Concat(message).ToArray();
 
             byte[] encryption = send_msg_socket_byte(newArray);
-            string temp = Encoding.UTF8.GetString(encryption);
-            if (temp == "false")
-                return "false";
-            string encryption_str = Convert.ToBase64String(encryption);
-            return encryption_str;
+            // returns the encrypted message in case it is not encrypted it returns the public key
+            return encryption;
+
+            //// taking the first byte inorder to know what the command is.
+            //int input = (int)encryption[0];
+            //byte[] new_byte_array = new byte[encryption.Length - 1]; // new byte array without the command
+
+            //// copy remaining values from original byte array to new byte array starting from index 1
+            //Array.Copy(encryption, 1, new_byte_array, 0, new_byte_array.Length);
+
+            ////string temp = Encoding.UTF8.GetString(encryption);
+            //// if the first byte is 0, it means the person was not yet in our dictionary
+            //// so a keyexchange will happen
+            //if (input == 0)
+            //{
+            //    return "false";
+            //}
+            //string encryption_str = Convert.ToBase64String(encryption);
+            //return encryption_str;
 
         }
 
@@ -115,6 +150,34 @@ namespace OutlookAddIn
             signClientSide.Init(false, param);
             signClientSide.BlockUpdate(body_UTF8, 0, body_UTF8.Length);
             return signClientSide.VerifySignature(signature_UTF8);
+        }
+
+        /// <summary>
+        /// receive the sender and his public key to save in the dictionary
+        /// return my public key in order to send it back to him.
+        /// </summary>
+        /// <param name="senderEmail"></param>
+        /// <param name="senderpK"></param>
+        /// <returns></returns>
+        internal byte[] KeyExchange(string senderEmail, byte[] senderpK, string myEmail)
+        {
+            //asking for the public key
+            byte byteToAdd = (byte)CHOICE.GET_KEY;
+            byte[] myEmail_UTF8 = System.Text.Encoding.UTF8.GetBytes(myEmail);
+
+            // the message with the action at the beginning
+            byte[] newArray = new byte[] { byteToAdd }.Concat(myEmail_UTF8).ToArray();
+            byte[] pk = send_msg_socket_byte(newArray);
+            // stores the senderEmail with the senderpK in the dictionary
+            byteToAdd = (byte)CHOICE.KEY_EX;
+            byte[]senderEmail_UTF8= System.Text.Encoding.UTF8.GetBytes(senderEmail);
+            byte[] seperator = System.Text.Encoding.UTF8.GetBytes("++++");
+            byte[]email_seperator= senderEmail_UTF8.Concat(seperator).ToArray();
+            byte[] email_pk = email_seperator.Concat(pk).ToArray();
+            newArray = new byte[] { byteToAdd }.Concat(email_pk).ToArray();
+            send_msg_socket_byte(newArray);
+            //returns the public key as a byte array in order to send it back.
+            return pk;
         }
 
         /// <summary>
